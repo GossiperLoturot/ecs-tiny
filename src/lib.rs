@@ -167,7 +167,7 @@ impl ECS {
         Ok(comp)
     }
 
-    pub fn get_comp<T: 'static>(&mut self, comp_key: CompKey) -> Result<&T, ECSError> {
+    pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Result<&T, ECSError> {
         let (type_key, slab_key) = comp_key;
 
         let comps = self
@@ -178,6 +178,21 @@ impl ECS {
             .downcast_ref::<slab::Slab<T>>()
             .check();
         let comp = comps.get(slab_key as usize).ok_or(ECSError::NotFound)?;
+
+        Ok(comp)
+    }
+
+    pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Result<&mut T, ECSError> {
+        let (type_key, slab_key) = comp_key;
+
+        let comps = self
+            .comps
+            .get_mut(&type_key)
+            .ok_or(ECSError::NotFound)?
+            .as_any_mut()
+            .downcast_mut::<slab::Slab<T>>()
+            .check();
+        let comp = comps.get_mut(slab_key as usize).ok_or(ECSError::NotFound)?;
 
         Ok(comp)
     }
@@ -193,6 +208,21 @@ impl ECS {
             .downcast_ref::<slab::Slab<T>>()
             .check();
         let iter = comps.iter().map(|(_, comp)| comp);
+
+        Ok(iter)
+    }
+
+    pub fn iter_comp_mut<T: 'static>(&mut self) -> Result<impl Iterator<Item = &mut T>, ECSError> {
+        let type_key = std::any::TypeId::of::<T>();
+
+        let comps = self
+            .comps
+            .get_mut(&type_key)
+            .ok_or(ECSError::NotFound)?
+            .as_any_mut()
+            .downcast_mut::<slab::Slab<T>>()
+            .check();
+        let iter = comps.iter_mut().map(|(_, comp)| comp);
 
         Ok(iter)
     }
@@ -230,6 +260,34 @@ impl ECS {
         let iter = relation_1
             .iter()
             .map(|(_, slab_key)| comps.get(*slab_key as usize).check());
+
+        Ok(iter)
+    }
+
+    pub fn iter_comp_mut_by_entity<T: 'static>(
+        &mut self,
+        entity_key: EntityKey,
+    ) -> Result<impl Iterator<Item = &mut T>, ECSError> {
+        let type_key = std::any::TypeId::of::<T>();
+
+        let comps = self
+            .comps
+            .get_mut(&type_key)
+            .ok_or(ECSError::NotFound)?
+            .as_any_mut()
+            .downcast_mut::<slab::Slab<T>>()
+            .check();
+
+        let relation_1 = self
+            .relation_1
+            .get(&(entity_key, type_key))
+            .ok_or(ECSError::NotFound)?;
+
+        // UNSAFE: allow double mutable borrow temporarily
+        let iter = relation_1
+            .iter()
+            .map(|(_, slab_key)| comps.get_mut(*slab_key as usize).check() as *mut T)
+            .map(|ptr| unsafe { &mut *ptr });
 
         Ok(iter)
     }

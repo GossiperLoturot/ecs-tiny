@@ -20,10 +20,16 @@ fn main() {
         .insert_comp(e0, CompA::new("World".to_string()))
         .unwrap();
 
-    let comp = plugin.get_comp::<CompA>(c1).unwrap();
-    println!("{}", comp.content);
+    for c in plugin.iter_comp_mut_by_entity::<CompA>(e0).unwrap() {
+        c.content += "!";
+    }
+
+    for c in plugin.iter_comp_by_entity::<CompA>(e0).unwrap() {
+        println!("{}", c.content);
+    }
 
     plugin.remove_comp::<CompA>(c0).unwrap();
+    plugin.remove_comp::<CompA>(c1).unwrap();
 
     plugin.remove_entity(e0).unwrap();
 }
