@@ -1,5 +1,7 @@
+/// A trait for operating of Slab without type annotation.
 trait AnySlab {
     fn as_any(&self) -> &dyn std::any::Any;
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
     fn try_remove(&mut self, key: usize) -> Option<()>;
@@ -273,6 +275,10 @@ impl ECS {
     pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Result<&T, ECSError> {
         let (type_key, slab_key) = comp_key;
 
+        if type_key != std::any::TypeId::of::<T>() {
+            return Err(ECSError::NotFound);
+        }
+
         let comps = self
             .comps
             .get(&type_key)
@@ -301,6 +307,10 @@ impl ECS {
     /// ```
     pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Result<&mut T, ECSError> {
         let (type_key, slab_key) = comp_key;
+
+        if type_key != std::any::TypeId::of::<T>() {
+            return Err(ECSError::NotFound);
+        }
 
         let comps = self
             .comps
@@ -521,6 +531,7 @@ impl std::fmt::Display for ECSError {
 
 impl std::error::Error for ECSError {}
 
+/// A trait for easily invoking unrecoverable integrity errors.
 trait IntegrityCheck<T> {
     fn check(self) -> T;
 }
