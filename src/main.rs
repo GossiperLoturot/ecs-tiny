@@ -11,7 +11,7 @@ impl CompA {
 fn main() {
     let mut plugin = ecs_tiny::ECS::new();
 
-    let e0 = plugin.insert_entity().unwrap();
+    let e0 = plugin.insert_entity();
 
     let c0 = plugin
         .insert_comp(e0, CompA::new("Hello".to_string()))

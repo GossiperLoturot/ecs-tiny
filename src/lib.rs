@@ -29,6 +29,13 @@ struct CompMeta {
     relation_1: u32,
 }
 
+/// Entity-Component-System.
+///
+/// # Examples
+///
+/// ```
+/// let mut ecs = ecs_tiny::ECS::new();
+/// ```
 #[derive(Default)]
 pub struct ECS {
     entities: slab::Slab<()>,
@@ -39,14 +46,40 @@ pub struct ECS {
 }
 
 impl ECS {
+    /// Create a new ECS instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// ```
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn insert_entity(&mut self) -> Result<EntityKey, ECSError> {
-        Ok(self.entities.insert(()) as u32)
+    /// Insert a new entity and return the corresponding entity key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// ```
+    pub fn insert_entity(&mut self) -> EntityKey {
+        self.entities.insert(()) as u32
     }
 
+    /// Remove an entity with the corresponding entity key.
+    /// If the entity corresponding to the entity key is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(()).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// ecs.remove_entity(entity_key).unwrap();
+    /// ```
     pub fn remove_entity(&mut self, entity_key: EntityKey) -> Result<(), ECSError> {
         self.entities
             .try_remove(entity_key as usize)
@@ -78,6 +111,17 @@ impl ECS {
         Ok(())
     }
 
+    /// Return entity with the corresponding entity key.
+    /// If the entity corresponding to the entity key is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(()).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// ecs.get_entity(entity_key).unwrap();
+    /// ```
     pub fn get_entity(&self, entity_key: EntityKey) -> Result<(), ECSError> {
         self.entities
             .get(entity_key as usize)
@@ -85,10 +129,37 @@ impl ECS {
         Ok(())
     }
 
+    /// Return an iterator over all entity keys.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key0 = ecs.insert_entity();
+    /// let entity_key1 = ecs.insert_entity();
+    /// let entity_key2 = ecs.insert_entity();
+    /// let mut iter = ecs.iter_entity();
+    ///
+    /// assert_eq!(iter.next(), Some(entity_key0));
+    /// assert_eq!(iter.next(), Some(entity_key1));
+    /// assert_eq!(iter.next(), Some(entity_key2));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn iter_entity(&self) -> impl Iterator<Item = EntityKey> + '_ {
         self.entities.iter().map(|(key, _)| key as u32)
     }
 
+    /// Insert a new component with the corresponding entity key and return the corresponding component key.
+    /// If the entity corresponding to the entity key is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(CompKey).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// ```
     pub fn insert_comp<T: 'static>(
         &mut self,
         entity_key: EntityKey,
@@ -135,8 +206,26 @@ impl ECS {
         Ok((type_key, slab_key))
     }
 
+    /// Remove a component with the corresponding component key and type, and return the component.
+    /// If the component corresponding to the component key and type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(T).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// let comp = ecs.remove_comp::<i32>(comp_key).unwrap();
+    ///
+    /// assert_eq!(comp, 42);
+    /// ```
     pub fn remove_comp<T: 'static>(&mut self, comp_key: CompKey) -> Result<T, ECSError> {
         let (type_key, slab_key) = comp_key;
+
+        if type_key != std::any::TypeId::of::<T>() {
+            return Err(ECSError::NotFound);
+        }
 
         let comps = self
             .comps
@@ -167,6 +256,20 @@ impl ECS {
         Ok(comp)
     }
 
+    /// Return a component with the corresponding component key and type.
+    /// If the component corresponding to the component key and type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(&T).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// let comp = ecs.get_comp::<i32>(comp_key).unwrap();
+    ///
+    /// assert_eq!(comp, &42);
+    /// ```
     pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Result<&T, ECSError> {
         let (type_key, slab_key) = comp_key;
 
@@ -182,6 +285,20 @@ impl ECS {
         Ok(comp)
     }
 
+    /// Return a mutable component with the corresponding component key and type.
+    /// If the component corresponding to the component key and type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(&mut T).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// let comp = ecs.get_comp_mut::<i32>(comp_key).unwrap();
+    ///
+    /// assert_eq!(comp, &mut 42);
+    /// ```
     pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Result<&mut T, ECSError> {
         let (type_key, slab_key) = comp_key;
 
@@ -197,6 +314,26 @@ impl ECS {
         Ok(comp)
     }
 
+    /// Return an iterator over all components of the corresponding type.
+    /// If the component type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(impl Iterator<Item = &T>).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key0 = ecs.insert_entity();
+    /// let entity_key1 = ecs.insert_entity();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp::<i32>().unwrap();
+    ///
+    /// assert_eq!(iter.next(), Some(&42));
+    /// assert_eq!(iter.next(), Some(&63));
+    /// assert_eq!(iter.next(), Some(&42));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn iter_comp<T: 'static>(&self) -> Result<impl Iterator<Item = &T>, ECSError> {
         let type_key = std::any::TypeId::of::<T>();
 
@@ -212,6 +349,26 @@ impl ECS {
         Ok(iter)
     }
 
+    /// Return a mutable iterator over all components of the corresponding type.
+    /// If the component type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(impl Iterator<Item = &mut T>).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key0 = ecs.insert_entity();
+    /// let entity_key1 = ecs.insert_entity();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp_mut::<i32>().unwrap();
+    ///
+    /// assert_eq!(iter.next(), Some(&mut 42));
+    /// assert_eq!(iter.next(), Some(&mut 63));
+    /// assert_eq!(iter.next(), Some(&mut 42));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn iter_comp_mut<T: 'static>(&mut self) -> Result<impl Iterator<Item = &mut T>, ECSError> {
         let type_key = std::any::TypeId::of::<T>();
 
@@ -227,6 +384,23 @@ impl ECS {
         Ok(iter)
     }
 
+    /// Return an entity key with the corresponding component key.
+    /// If the component corresponding to the component key is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(EntityKey).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key0 = ecs.insert_entity();
+    /// let entity_key1 = ecs.insert_entity();
+    /// let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
+    /// let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
+    /// let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let entity_key = ecs.get_entity_by_comp(comp_key0).unwrap();
+    ///
+    /// assert_eq!(entity_key, entity_key0);
+    /// ```
     pub fn get_entity_by_comp(&self, comp_key: CompKey) -> Result<EntityKey, ECSError> {
         let (type_key, slab_key) = comp_key;
 
@@ -238,6 +412,25 @@ impl ECS {
         Ok(comp_meta.entity_key)
     }
 
+    /// Return an iterator over all components with the corresponding entity key and type.
+    /// If the entity corresponding to the entity key and type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(impl Iterator<Item = &T>).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key0 = ecs.insert_entity();
+    /// let entity_key1 = ecs.insert_entity();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp_by_entity::<i32>(entity_key0).unwrap();
+    ///
+    /// assert_eq!(iter.next(), Some(&42));
+    /// assert_eq!(iter.next(), Some(&63));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn iter_comp_by_entity<T: 'static>(
         &self,
         entity_key: EntityKey,
@@ -264,6 +457,25 @@ impl ECS {
         Ok(iter)
     }
 
+    /// Return a mutable iterator over all components with the corresponding entity key and type.
+    /// If the entity corresponding to the entity key and type is not found, return an Err(ECSError::NotFound).
+    /// Otherwise, return an Ok(impl Iterator<Item = &mut T>).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key0 = ecs.insert_entity();
+    /// let entity_key1 = ecs.insert_entity();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp_mut_by_entity::<i32>(entity_key0).unwrap();
+    ///
+    /// assert_eq!(iter.next(), Some(&mut 42));
+    /// assert_eq!(iter.next(), Some(&mut 63));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn iter_comp_mut_by_entity<T: 'static>(
         &mut self,
         entity_key: EntityKey,
@@ -293,6 +505,7 @@ impl ECS {
     }
 }
 
+/// The error type for ECS operations.
 #[derive(Debug)]
 pub enum ECSError {
     NotFound,
