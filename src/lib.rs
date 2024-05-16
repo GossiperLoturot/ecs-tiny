@@ -486,6 +486,24 @@ impl ECS {
 
         Some(iter)
     }
+
+    /// Clear all entities and components.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// ecs.clear();
+    /// ```
+    pub fn clear(&mut self) {
+        self.entities.clear();
+        self.comps.clear();
+        self.comp_metas.clear();
+        self.relation_0.clear();
+        self.relation_1.clear();
+    }
 }
 
 /// A trait for easily invoking unrecoverable integrity errors.

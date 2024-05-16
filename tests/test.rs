@@ -142,3 +142,15 @@ fn iter_comp_by_entity() {
     assert_eq!(iter.next(), Some(&mut 63));
     assert_eq!(iter.next(), None);
 }
+
+#[test]
+fn clear() {
+    let mut ecs = ecs_tiny::ECS::new();
+    let entity_key0 = ecs.insert_entity();
+    let entity_key1 = ecs.insert_entity();
+    ecs.insert_comp(entity_key0, 42).unwrap();
+    ecs.insert_comp(entity_key0, 63).unwrap();
+    ecs.insert_comp(entity_key1, 42).unwrap();
+    ecs.insert_comp(entity_key1, ()).unwrap();
+    ecs.clear();
+}

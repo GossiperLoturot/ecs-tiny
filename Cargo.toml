@@ -1,7 +1,14 @@
 [package]
 name = "ecs-tiny"
 version = "0.1.0"
+authors = ["GossiperLoturot"]
 edition = "2021"
+description = "A minimal ECS supporting entity and component insertion/removal, association, and single-type iteration."
+readme = "README.md"
+repository = "https://github.com/GossiperLoturot/ecs-tiny"
+license = "MIT"
+keywords = ["game", "ecs"]
+categories = ["data-structures", "game-engines", "game-development"]
 
 [dependencies]
 ahash = "0.8"
