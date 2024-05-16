@@ -3,11 +3,11 @@ fn crud_entity() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key = ecs.insert_entity();
 
-    assert!(ecs.get_entity(entity_key).is_ok());
-    assert!(ecs.remove_entity(entity_key).is_ok());
+    assert!(ecs.get_entity(entity_key).is_some());
+    assert!(ecs.remove_entity(entity_key).is_some());
 
-    assert!(ecs.get_entity(entity_key).is_err());
-    assert!(ecs.remove_entity(entity_key).is_err());
+    assert!(ecs.get_entity(entity_key).is_none());
+    assert!(ecs.remove_entity(entity_key).is_none());
 }
 
 #[test]
@@ -16,13 +16,13 @@ fn crud_comp() {
     let entity_key = ecs.insert_entity();
     let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
 
-    assert_eq!(ecs.get_comp::<i32>(comp_key).ok(), Some(&42));
-    assert_eq!(ecs.get_comp_mut::<i32>(comp_key).ok(), Some(&mut 42));
-    assert_eq!(ecs.remove_comp::<i32>(comp_key).ok(), Some(42));
+    assert_eq!(ecs.get_comp::<i32>(comp_key), Some(&42));
+    assert_eq!(ecs.get_comp_mut::<i32>(comp_key), Some(&mut 42));
+    assert_eq!(ecs.remove_comp::<i32>(comp_key), Some(42));
 
-    assert_eq!(ecs.get_comp::<i32>(comp_key).ok(), None);
-    assert_eq!(ecs.get_comp_mut::<i32>(comp_key).ok(), None);
-    assert_eq!(ecs.remove_comp::<i32>(comp_key).ok(), None);
+    assert_eq!(ecs.get_comp::<i32>(comp_key), None);
+    assert_eq!(ecs.get_comp_mut::<i32>(comp_key), None);
+    assert_eq!(ecs.remove_comp::<i32>(comp_key), None);
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn insert_comp_with_invalid_entity() {
     let entity_key = ecs.insert_entity();
     ecs.remove_entity(entity_key).unwrap();
 
-    assert!(ecs.insert_comp(entity_key, 42).is_err());
+    assert!(ecs.insert_comp(entity_key, 42).is_none());
 }
 
 #[test]
@@ -40,9 +40,9 @@ fn remove_comp_with_invalid_type() {
     let entity_key = ecs.insert_entity();
     let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
 
-    assert!(ecs.get_comp::<()>(comp_key).is_err());
-    assert!(ecs.get_comp_mut::<()>(comp_key).is_err());
-    assert!(ecs.remove_comp::<()>(comp_key).is_err());
+    assert!(ecs.get_comp::<()>(comp_key).is_none());
+    assert!(ecs.get_comp_mut::<()>(comp_key).is_none());
+    assert!(ecs.remove_comp::<()>(comp_key).is_none());
 }
 
 #[test]
@@ -51,11 +51,11 @@ fn remove_entity_and_associated_comp() {
     let entity_key = ecs.insert_entity();
     let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
 
-    assert!(ecs.remove_entity(entity_key).is_ok());
+    assert!(ecs.remove_entity(entity_key).is_some());
 
-    assert!(ecs.get_entity(entity_key).is_err());
-    assert!(ecs.get_comp::<i32>(comp_key).is_err());
-    assert!(ecs.get_comp_mut::<i32>(comp_key).is_err());
+    assert!(ecs.get_entity(entity_key).is_none());
+    assert!(ecs.get_comp::<i32>(comp_key).is_none());
+    assert!(ecs.get_comp_mut::<i32>(comp_key).is_none());
 }
 
 #[test]
@@ -99,8 +99,8 @@ fn iter_comp() {
 fn iter_comp_with_invalid_type() {
     let mut ecs = ecs_tiny::ECS::new();
 
-    assert!(ecs.iter_comp::<i32>().is_err());
-    assert!(ecs.iter_comp_mut::<i32>().is_err());
+    assert!(ecs.iter_comp::<i32>().is_none());
+    assert!(ecs.iter_comp_mut::<i32>().is_none());
 }
 
 #[test]
@@ -114,10 +114,10 @@ fn get_entity_by_comp() {
     let comp_key3 = ecs.insert_comp(entity_key1, ()).unwrap();
     ecs.remove_comp::<i32>(comp_key2).unwrap();
 
-    assert_eq!(ecs.get_entity_by_comp(comp_key0).ok(), Some(entity_key0));
-    assert_eq!(ecs.get_entity_by_comp(comp_key1).ok(), Some(entity_key0));
-    assert_eq!(ecs.get_entity_by_comp(comp_key2).ok(), None);
-    assert_eq!(ecs.get_entity_by_comp(comp_key3).ok(), Some(entity_key1));
+    assert_eq!(ecs.get_entity_by_comp(comp_key0), Some(entity_key0));
+    assert_eq!(ecs.get_entity_by_comp(comp_key1), Some(entity_key0));
+    assert_eq!(ecs.get_entity_by_comp(comp_key2), None);
+    assert_eq!(ecs.get_entity_by_comp(comp_key3), Some(entity_key1));
 }
 
 #[test]

@@ -82,10 +82,8 @@ impl ECS {
     /// let entity_key = ecs.insert_entity();
     /// ecs.remove_entity(entity_key).unwrap();
     /// ```
-    pub fn remove_entity(&mut self, entity_key: EntityKey) -> Result<(), ECSError> {
-        self.entities
-            .try_remove(entity_key as usize)
-            .ok_or(ECSError::NotFound)?;
+    pub fn remove_entity(&mut self, entity_key: EntityKey) -> Option<()> {
+        self.entities.try_remove(entity_key as usize)?;
 
         if let Some(relation_0) = self.relation_0.remove(&entity_key) {
             for (_, (type_key, slab_key)) in relation_0 {
@@ -110,7 +108,7 @@ impl ECS {
             }
         }
 
-        Ok(())
+        Some(())
     }
 
     /// Return entity with the corresponding entity key.
@@ -124,11 +122,9 @@ impl ECS {
     /// let entity_key = ecs.insert_entity();
     /// ecs.get_entity(entity_key).unwrap();
     /// ```
-    pub fn get_entity(&self, entity_key: EntityKey) -> Result<(), ECSError> {
-        self.entities
-            .get(entity_key as usize)
-            .ok_or(ECSError::NotFound)?;
-        Ok(())
+    pub fn get_entity(&self, entity_key: EntityKey) -> Option<()> {
+        self.entities.get(entity_key as usize)?;
+        Some(())
     }
 
     /// Return an iterator over all entity keys.
@@ -162,14 +158,8 @@ impl ECS {
     /// let entity_key = ecs.insert_entity();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ```
-    pub fn insert_comp<T: 'static>(
-        &mut self,
-        entity_key: EntityKey,
-        comp: T,
-    ) -> Result<CompKey, ECSError> {
-        self.entities
-            .get(entity_key as usize)
-            .ok_or(ECSError::NotFound)?;
+    pub fn insert_comp<T: 'static>(&mut self, entity_key: EntityKey, comp: T) -> Option<CompKey> {
+        self.entities.get(entity_key as usize)?;
 
         let type_key = std::any::TypeId::of::<T>();
 
@@ -205,7 +195,7 @@ impl ECS {
             .or_default()
             .insert(comp_meta);
 
-        Ok((type_key, slab_key))
+        Some((type_key, slab_key))
     }
 
     /// Remove a component with the corresponding component key and type, and return the component.
@@ -222,23 +212,20 @@ impl ECS {
     ///
     /// assert_eq!(comp, 42);
     /// ```
-    pub fn remove_comp<T: 'static>(&mut self, comp_key: CompKey) -> Result<T, ECSError> {
+    pub fn remove_comp<T: 'static>(&mut self, comp_key: CompKey) -> Option<T> {
         let (type_key, slab_key) = comp_key;
 
         if type_key != std::any::TypeId::of::<T>() {
-            return Err(ECSError::NotFound);
+            return None;
         }
 
         let comps = self
             .comps
-            .get_mut(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get_mut(&type_key)?
             .as_any_mut()
             .downcast_mut::<slab::Slab<T>>()
             .check();
-        let comp = comps
-            .try_remove(slab_key as usize)
-            .ok_or(ECSError::NotFound)?;
+        let comp = comps.try_remove(slab_key as usize)?;
 
         let comp_metas = self.comp_metas.get_mut(&type_key).check();
         let comp_meta = comp_metas.try_remove(slab_key as usize).check();
@@ -255,7 +242,7 @@ impl ECS {
             .try_remove(comp_meta.relation_1 as usize)
             .check();
 
-        Ok(comp)
+        Some(comp)
     }
 
     /// Return a component with the corresponding component key and type.
@@ -272,23 +259,22 @@ impl ECS {
     ///
     /// assert_eq!(comp, &42);
     /// ```
-    pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Result<&T, ECSError> {
+    pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Option<&T> {
         let (type_key, slab_key) = comp_key;
 
         if type_key != std::any::TypeId::of::<T>() {
-            return Err(ECSError::NotFound);
+            return None;
         }
 
         let comps = self
             .comps
-            .get(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get(&type_key)?
             .as_any()
             .downcast_ref::<slab::Slab<T>>()
             .check();
-        let comp = comps.get(slab_key as usize).ok_or(ECSError::NotFound)?;
+        let comp = comps.get(slab_key as usize)?;
 
-        Ok(comp)
+        Some(comp)
     }
 
     /// Return a mutable component with the corresponding component key and type.
@@ -305,23 +291,22 @@ impl ECS {
     ///
     /// assert_eq!(comp, &mut 42);
     /// ```
-    pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Result<&mut T, ECSError> {
+    pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Option<&mut T> {
         let (type_key, slab_key) = comp_key;
 
         if type_key != std::any::TypeId::of::<T>() {
-            return Err(ECSError::NotFound);
+            return None;
         }
 
         let comps = self
             .comps
-            .get_mut(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get_mut(&type_key)?
             .as_any_mut()
             .downcast_mut::<slab::Slab<T>>()
             .check();
-        let comp = comps.get_mut(slab_key as usize).ok_or(ECSError::NotFound)?;
+        let comp = comps.get_mut(slab_key as usize)?;
 
-        Ok(comp)
+        Some(comp)
     }
 
     /// Return an iterator over all components of the corresponding type.
@@ -344,19 +329,18 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp<T: 'static>(&self) -> Result<impl Iterator<Item = &T>, ECSError> {
+    pub fn iter_comp<T: 'static>(&self) -> Option<impl Iterator<Item = &T>> {
         let type_key = std::any::TypeId::of::<T>();
 
         let comps = self
             .comps
-            .get(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get(&type_key)?
             .as_any()
             .downcast_ref::<slab::Slab<T>>()
             .check();
         let iter = comps.iter().map(|(_, comp)| comp);
 
-        Ok(iter)
+        Some(iter)
     }
 
     /// Return a mutable iterator over all components of the corresponding type.
@@ -379,19 +363,18 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&mut 42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_mut<T: 'static>(&mut self) -> Result<impl Iterator<Item = &mut T>, ECSError> {
+    pub fn iter_comp_mut<T: 'static>(&mut self) -> Option<impl Iterator<Item = &mut T>> {
         let type_key = std::any::TypeId::of::<T>();
 
         let comps = self
             .comps
-            .get_mut(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get_mut(&type_key)?
             .as_any_mut()
             .downcast_mut::<slab::Slab<T>>()
             .check();
         let iter = comps.iter_mut().map(|(_, comp)| comp);
 
-        Ok(iter)
+        Some(iter)
     }
 
     /// Return an entity key with the corresponding component key.
@@ -411,15 +394,13 @@ impl ECS {
     ///
     /// assert_eq!(entity_key, entity_key0);
     /// ```
-    pub fn get_entity_by_comp(&self, comp_key: CompKey) -> Result<EntityKey, ECSError> {
+    pub fn get_entity_by_comp(&self, comp_key: CompKey) -> Option<EntityKey> {
         let (type_key, slab_key) = comp_key;
 
-        let comp_metas = self.comp_metas.get(&type_key).ok_or(ECSError::NotFound)?;
-        let comp_meta = comp_metas
-            .get(slab_key as usize)
-            .ok_or(ECSError::NotFound)?;
+        let comp_metas = self.comp_metas.get(&type_key)?;
+        let comp_meta = comp_metas.get(slab_key as usize)?;
 
-        Ok(comp_meta.entity_key)
+        Some(comp_meta.entity_key)
     }
 
     /// Return an iterator over all components with the corresponding entity key and type.
@@ -444,27 +425,23 @@ impl ECS {
     pub fn iter_comp_by_entity<T: 'static>(
         &self,
         entity_key: EntityKey,
-    ) -> Result<impl Iterator<Item = &T>, ECSError> {
+    ) -> Option<impl Iterator<Item = &T>> {
         let type_key = std::any::TypeId::of::<T>();
 
         let comps = self
             .comps
-            .get(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get(&type_key)?
             .as_any()
             .downcast_ref::<slab::Slab<T>>()
             .check();
 
-        let relation_1 = self
-            .relation_1
-            .get(&(entity_key, type_key))
-            .ok_or(ECSError::NotFound)?;
+        let relation_1 = self.relation_1.get(&(entity_key, type_key))?;
 
         let iter = relation_1
             .iter()
             .map(|(_, slab_key)| comps.get(*slab_key as usize).check());
 
-        Ok(iter)
+        Some(iter)
     }
 
     /// Return a mutable iterator over all components with the corresponding entity key and type.
@@ -489,21 +466,17 @@ impl ECS {
     pub fn iter_comp_mut_by_entity<T: 'static>(
         &mut self,
         entity_key: EntityKey,
-    ) -> Result<impl Iterator<Item = &mut T>, ECSError> {
+    ) -> Option<impl Iterator<Item = &mut T>> {
         let type_key = std::any::TypeId::of::<T>();
 
         let comps = self
             .comps
-            .get_mut(&type_key)
-            .ok_or(ECSError::NotFound)?
+            .get_mut(&type_key)?
             .as_any_mut()
             .downcast_mut::<slab::Slab<T>>()
             .check();
 
-        let relation_1 = self
-            .relation_1
-            .get(&(entity_key, type_key))
-            .ok_or(ECSError::NotFound)?;
+        let relation_1 = self.relation_1.get(&(entity_key, type_key))?;
 
         // UNSAFE: allow double mutable borrow temporarily
         let iter = relation_1
@@ -511,25 +484,9 @@ impl ECS {
             .map(|(_, slab_key)| comps.get_mut(*slab_key as usize).check() as *mut T)
             .map(|ptr| unsafe { &mut *ptr });
 
-        Ok(iter)
+        Some(iter)
     }
 }
-
-/// The error type for ECS operations.
-#[derive(Debug)]
-pub enum ECSError {
-    NotFound,
-}
-
-impl std::fmt::Display for ECSError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            ECSError::NotFound => write!(f, "not found error"),
-        }
-    }
-}
-
-impl std::error::Error for ECSError {}
 
 /// A trait for easily invoking unrecoverable integrity errors.
 trait IntegrityCheck<T> {
@@ -537,12 +494,6 @@ trait IntegrityCheck<T> {
 }
 
 impl<T> IntegrityCheck<T> for Option<T> {
-    fn check(self) -> T {
-        self.expect("integrity check")
-    }
-}
-
-impl<T, U: std::error::Error> IntegrityCheck<T> for Result<T, U> {
     fn check(self) -> T {
         self.expect("integrity check")
     }
