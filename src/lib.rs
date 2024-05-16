@@ -1,3 +1,45 @@
+//! # ecs-tiny
+//! 
+//! A minimal ECS supporting entity and component insertion/removal, association, and single-type iteration.
+//! 
+//! # Usages
+//! 
+//! ```
+//! // Create new ecs instance and inserts new entity:
+//!
+//! let mut ecs = ecs_tiny::ECS::new();
+//! 
+//! let entity_key0 = ecs.insert_entity();
+//! let entity_key1 = ecs.insert_entity();
+//! 
+//! // Inserts new component associated with specified entity:
+//! 
+//! let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
+//! let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
+//! let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
+//! let comp_key3 = ecs.insert_comp(entity_key1, ()).unwrap();
+//! 
+//! // Iterates over all components associated with specified entity:
+//! 
+//! for comp in ecs.iter_comp_mut_by_entity::<i32>(entity_key0).unwrap() {
+//!     *comp += 1;
+//! }
+//! 
+//! // Iterates over all components of specified type (single type only):
+//! 
+//! for comp in ecs.iter_comp_mut::<i32>().unwrap() {
+//!     *comp += 1;
+//! }
+//! 
+//! // Removes specified component:
+//! 
+//! ecs.remove_comp::<i32>(comp_key0).unwrap();
+//! 
+//! // Removes specified entity:
+//! 
+//! ecs.remove_entity(entity_key1).unwrap();
+//! ```
+
 /// A trait for operating of Slab without type annotation.
 trait AnySlab {
     fn as_any(&self) -> &dyn std::any::Any;
@@ -31,12 +73,21 @@ struct CompMeta {
     relation_1: u32,
 }
 
-/// Entity-Component-System.
+/// A minimal ECS supporting entity and component insertion/removal, association, and single-type iteration.
 ///
 /// # Examples
 ///
 /// ```
 /// let mut ecs = ecs_tiny::ECS::new();
+///
+/// let entity_key = ecs.insert_entity();
+///
+/// let comp_key0 = ecs.insert_comp(entity_key, 42).unwrap();
+/// let comp_key1 = ecs.insert_comp(entity_key, 63).unwrap();
+///
+/// for comp in ecs.iter_comp_mut::<i32>().unwrap() {
+///     *comp += 1;
+/// }
 /// ```
 #[derive(Default)]
 pub struct ECS {
@@ -72,8 +123,8 @@ impl ECS {
     }
 
     /// Remove an entity with the corresponding entity key.
-    /// If the entity corresponding to the entity key is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(()).
+    /// If the entity corresponding to the entity key is not found, return an `None`.
+    /// Otherwise, return an `Some(())`.
     ///
     /// # Examples
     ///
@@ -112,8 +163,8 @@ impl ECS {
     }
 
     /// Return entity with the corresponding entity key.
-    /// If the entity corresponding to the entity key is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(()).
+    /// If the entity corresponding to the entity key is not found, return an `None`.
+    /// Otherwise, return an `Some(())`.
     ///
     /// # Examples
     ///
@@ -148,8 +199,8 @@ impl ECS {
     }
 
     /// Insert a new component with the corresponding entity key and return the corresponding component key.
-    /// If the entity corresponding to the entity key is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(CompKey).
+    /// If the entity corresponding to the entity key is not found, return an `None`.
+    /// Otherwise, return an `Some(CompKey)`.
     ///
     /// # Examples
     ///
@@ -199,8 +250,8 @@ impl ECS {
     }
 
     /// Remove a component with the corresponding component key and type, and return the component.
-    /// If the component corresponding to the component key and type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(T).
+    /// If the component corresponding to the component key and type is not found, return an `None`.
+    /// Otherwise, return an `Some(T)`.
     ///
     /// # Examples
     ///
@@ -246,8 +297,8 @@ impl ECS {
     }
 
     /// Return a component with the corresponding component key and type.
-    /// If the component corresponding to the component key and type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(&T).
+    /// If the component corresponding to the component key and type is not found, return an `None`.
+    /// Otherwise, return an `Some(&T)`.
     ///
     /// # Examples
     ///
@@ -278,8 +329,8 @@ impl ECS {
     }
 
     /// Return a mutable component with the corresponding component key and type.
-    /// If the component corresponding to the component key and type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(&mut T).
+    /// If the component corresponding to the component key and type is not found, return an `None`.
+    /// Otherwise, return an `Some(&mut T)`.
     ///
     /// # Examples
     ///
@@ -310,8 +361,8 @@ impl ECS {
     }
 
     /// Return an iterator over all components of the corresponding type.
-    /// If the component type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(impl Iterator<Item = &T>).
+    /// If the component type is not found, return an `None`.
+    /// Otherwise, return an `Some(impl Iterator<Item = &T>)`.
     ///
     /// # Examples
     ///
@@ -344,8 +395,8 @@ impl ECS {
     }
 
     /// Return a mutable iterator over all components of the corresponding type.
-    /// If the component type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(impl Iterator<Item = &mut T>).
+    /// If the component type is not found, return an `None`.
+    /// Otherwise, return an `Some(impl Iterator<Item = &mut T>)`.
     ///
     /// # Examples
     ///
@@ -378,8 +429,8 @@ impl ECS {
     }
 
     /// Return an entity key with the corresponding component key.
-    /// If the component corresponding to the component key is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(EntityKey).
+    /// If the component corresponding to the component key is not found, return an `None`.
+    /// Otherwise, return an `Some(EntityKey)`.
     ///
     /// # Examples
     ///
@@ -404,8 +455,8 @@ impl ECS {
     }
 
     /// Return an iterator over all components with the corresponding entity key and type.
-    /// If the entity corresponding to the entity key and type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(impl Iterator<Item = &T>).
+    /// If the entity corresponding to the entity key and type is not found, return an `None`.
+    /// Otherwise, return an `Some(impl Iterator<Item = &T>)`.
     ///
     /// # Examples
     ///
@@ -445,8 +496,8 @@ impl ECS {
     }
 
     /// Return a mutable iterator over all components with the corresponding entity key and type.
-    /// If the entity corresponding to the entity key and type is not found, return an Err(ECSError::NotFound).
-    /// Otherwise, return an Ok(impl Iterator<Item = &mut T>).
+    /// If the entity corresponding to the entity key and type is not found, return an `None`.
+    /// Otherwise, return an `None(impl Iterator<Item = &mut T>)`.
     ///
     /// # Examples
     ///
