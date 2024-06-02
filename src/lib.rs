@@ -1,73 +1,55 @@
 //! # ecs-tiny
-//! 
+//!
 //! A minimal ECS supporting entity and component insertion/removal, association, and single-type iteration.
-//! 
+//!
 //! # Usages
-//! 
+//!
 //! ```
 //! // Create new ecs instance and inserts new entity:
 //!
 //! let mut ecs = ecs_tiny::ECS::new();
-//! 
+//!
 //! let entity_key0 = ecs.insert_entity();
 //! let entity_key1 = ecs.insert_entity();
-//! 
+//!
 //! // Inserts new component associated with specified entity:
-//! 
+//!
 //! let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
 //! let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
 //! let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
 //! let comp_key3 = ecs.insert_comp(entity_key1, ()).unwrap();
-//! 
+//!
 //! // Iterates over all components associated with specified entity:
-//! 
+//!
 //! for comp in ecs.iter_comp_mut_by_entity::<i32>(entity_key0).unwrap() {
 //!     *comp += 1;
 //! }
-//! 
+//!
 //! // Iterates over all components of specified type (single type only):
-//! 
+//!
 //! for comp in ecs.iter_comp_mut::<i32>().unwrap() {
 //!     *comp += 1;
 //! }
-//! 
+//!
 //! // Removes specified component:
-//! 
+//!
 //! ecs.remove_comp::<i32>(comp_key0).unwrap();
-//! 
+//!
 //! // Removes specified entity:
-//! 
+//!
 //! ecs.remove_entity(entity_key1).unwrap();
 //! ```
 
-/// A trait for operating of Slab without type annotation.
-trait AnySlab {
-    fn as_any(&self) -> &dyn std::any::Any;
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-
-    fn try_remove(&mut self, key: usize) -> Option<()>;
-}
-
-impl<T: 'static> AnySlab for slab::Slab<T> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn try_remove(&mut self, key: usize) -> Option<()> {
-        self.try_remove(key).map(|_| ())
-    }
+trait Comp {
+    fn kind(&self) -> u32;
 }
 
 type EntityKey = u32;
 
-type CompKey = (std::any::TypeId, u32);
+type CompKey = (u32, u32);
 
-struct CompMeta {
+struct CompMeta<T> {
+    inner: T,
     entity_key: u32,
     relation_0: u32,
     relation_1: u32,
@@ -89,16 +71,25 @@ struct CompMeta {
 ///     *comp += 1;
 /// }
 /// ```
-#[derive(Default)]
-pub struct ECS {
+pub struct ECS<T> {
     entities: slab::Slab<()>,
-    comps: ahash::AHashMap<std::any::TypeId, Box<dyn AnySlab>>,
-    comp_metas: ahash::AHashMap<std::any::TypeId, slab::Slab<CompMeta>>,
-    relation_0: ahash::AHashMap<EntityKey, slab::Slab<(std::any::TypeId, u32)>>,
-    relation_1: ahash::AHashMap<(EntityKey, std::any::TypeId), slab::Slab<u32>>,
+    comp_metas: ahash::AHashMap<u32, slab::Slab<CompMeta<T>>>,
+    relation_0: ahash::AHashMap<EntityKey, slab::Slab<(u32, u32)>>,
+    relation_1: ahash::AHashMap<(EntityKey, u32), slab::Slab<u32>>,
 }
 
-impl ECS {
+impl<T> Default for ECS<T> {
+    fn default() -> Self {
+        Self {
+            entities: Default::default(),
+            comp_metas: Default::default(),
+            relation_0: Default::default(),
+            relation_1: Default::default(),
+        }
+    }
+}
+
+impl<T: Comp> ECS<T> {
     /// Create a new ECS instance.
     ///
     /// # Examples
@@ -138,12 +129,6 @@ impl ECS {
 
         if let Some(relation_0) = self.relation_0.remove(&entity_key) {
             for (_, (type_key, slab_key)) in relation_0 {
-                self.comps
-                    .get_mut(&type_key)
-                    .check()
-                    .try_remove(slab_key as usize)
-                    .check();
-
                 let comp_meta = self
                     .comp_metas
                     .get_mut(&type_key)
@@ -209,44 +194,36 @@ impl ECS {
     /// let entity_key = ecs.insert_entity();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ```
-    pub fn insert_comp<T: 'static>(&mut self, entity_key: EntityKey, comp: T) -> Option<CompKey> {
+    pub fn insert_comp(&mut self, entity_key: EntityKey, comp: T) -> Option<CompKey> {
         self.entities.get(entity_key as usize)?;
 
-        let type_key = std::any::TypeId::of::<T>();
+        let kind_key = comp.kind();
 
-        let comps = self
-            .comps
-            .entry(type_key)
-            .or_insert_with(|| Box::new(slab::Slab::<T>::new()))
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
+        let comp_metas = self.comp_metas.entry(kind_key).or_default();
 
-        let slab_key = comps.insert(comp) as u32;
+        let slab_key = comp_metas.vacant_key() as u32;
 
         let relation_0 = self
             .relation_0
             .entry(entity_key)
             .or_default()
-            .insert((type_key, slab_key)) as u32;
+            .insert((kind_key, slab_key)) as u32;
 
         let relation_1 = self
             .relation_1
-            .entry((entity_key, type_key))
+            .entry((entity_key, kind_key))
             .or_default()
             .insert(slab_key) as u32;
 
         let comp_meta = CompMeta {
+            inner: comp,
             entity_key,
             relation_0,
             relation_1,
         };
-        self.comp_metas
-            .entry(type_key)
-            .or_default()
-            .insert(comp_meta);
+        comp_metas.insert(comp_meta);
 
-        Some((type_key, slab_key))
+        Some((kind_key, slab_key))
     }
 
     /// Remove a component with the corresponding component key and type, and return the component.
@@ -263,23 +240,11 @@ impl ECS {
     ///
     /// assert_eq!(comp, 42);
     /// ```
-    pub fn remove_comp<T: 'static>(&mut self, comp_key: CompKey) -> Option<T> {
-        let (type_key, slab_key) = comp_key;
+    pub fn remove_comp(&mut self, comp_key: CompKey) -> Option<T> {
+        let (kind_key, slab_key) = comp_key;
 
-        if type_key != std::any::TypeId::of::<T>() {
-            return None;
-        }
-
-        let comps = self
-            .comps
-            .get_mut(&type_key)?
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
-        let comp = comps.try_remove(slab_key as usize)?;
-
-        let comp_metas = self.comp_metas.get_mut(&type_key).check();
-        let comp_meta = comp_metas.try_remove(slab_key as usize).check();
+        let comp_metas = self.comp_metas.get_mut(&kind_key)?;
+        let comp_meta = comp_metas.try_remove(slab_key as usize)?;
 
         self.relation_0
             .get_mut(&comp_meta.entity_key)
@@ -288,12 +253,12 @@ impl ECS {
             .check();
 
         self.relation_1
-            .get_mut(&(comp_meta.entity_key, type_key))
+            .get_mut(&(comp_meta.entity_key, kind_key))
             .check()
             .try_remove(comp_meta.relation_1 as usize)
             .check();
 
-        Some(comp)
+        Some(comp_meta.inner)
     }
 
     /// Return a component with the corresponding component key and type.
@@ -310,22 +275,13 @@ impl ECS {
     ///
     /// assert_eq!(comp, &42);
     /// ```
-    pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Option<&T> {
-        let (type_key, slab_key) = comp_key;
+    pub fn get_comp(&self, comp_key: CompKey) -> Option<&T> {
+        let (kind_key, slab_key) = comp_key;
 
-        if type_key != std::any::TypeId::of::<T>() {
-            return None;
-        }
+        let comps = self.comp_metas.get(&kind_key)?;
+        let comp_meta = comps.get(slab_key as usize)?;
 
-        let comps = self
-            .comps
-            .get(&type_key)?
-            .as_any()
-            .downcast_ref::<slab::Slab<T>>()
-            .check();
-        let comp = comps.get(slab_key as usize)?;
-
-        Some(comp)
+        Some(&comp_meta.inner)
     }
 
     /// Return a mutable component with the corresponding component key and type.
@@ -342,22 +298,13 @@ impl ECS {
     ///
     /// assert_eq!(comp, &mut 42);
     /// ```
-    pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Option<&mut T> {
-        let (type_key, slab_key) = comp_key;
+    pub fn get_comp_mut(&mut self, comp_key: CompKey) -> Option<&mut T> {
+        let (kind_key, slab_key) = comp_key;
 
-        if type_key != std::any::TypeId::of::<T>() {
-            return None;
-        }
+        let comp_metas = self.comp_metas.get_mut(&kind_key)?;
+        let comp_meta = comp_metas.get_mut(slab_key as usize)?;
 
-        let comps = self
-            .comps
-            .get_mut(&type_key)?
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
-        let comp = comps.get_mut(slab_key as usize)?;
-
-        Some(comp)
+        Some(&mut comp_meta.inner)
     }
 
     /// Return an iterator over all components of the corresponding type.
@@ -380,15 +327,10 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp<T: 'static>(&self) -> Option<impl Iterator<Item = &T>> {
+    pub fn iter_comp(&self) -> Option<impl Iterator<Item = &T>> {
         let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self
-            .comps
-            .get(&type_key)?
-            .as_any()
-            .downcast_ref::<slab::Slab<T>>()
-            .check();
+        let comps = self.comp_metas.get(&type_key)?;
         let iter = comps.iter().map(|(_, comp)| comp);
 
         Some(iter)
