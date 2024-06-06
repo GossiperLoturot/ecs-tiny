@@ -1,6 +1,6 @@
 [package]
 name = "ecs-tiny"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["GossiperLoturot"]
 edition = "2021"
 description = "A minimal ECS supporting entity and component insertion/removal, association, and single-type iteration."
