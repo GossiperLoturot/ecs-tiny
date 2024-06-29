@@ -1,6 +1,5 @@
 #[test]
 fn crud_entity() {
-    Component::Unit(()).
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key = ecs.insert_entity();
 

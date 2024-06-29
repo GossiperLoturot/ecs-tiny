@@ -40,6 +40,10 @@
 //! ecs.remove_entity(entity_key1).unwrap();
 //! ```
 
+trait Comp {
+    fn kind(&self) -> u32;
+}
+
 type EntityKey = u32;
 
 type CompKey = (u32, u32);
@@ -67,31 +71,25 @@ struct CompMeta<T> {
 ///     *comp += 1;
 /// }
 /// ```
-pub struct ECS<C, K> {
+pub struct ECS<T> {
     entities: slab::Slab<()>,
-    comp_metas: ahash::AHashMap<u32, slab::Slab<CompMeta<C>>>,
+    comp_metas: ahash::AHashMap<u32, slab::Slab<CompMeta<T>>>,
     relation_0: ahash::AHashMap<EntityKey, slab::Slab<(u32, u32)>>,
     relation_1: ahash::AHashMap<(EntityKey, u32), slab::Slab<u32>>,
-    _phantom: std::marker::PhantomData<K>,
 }
 
-impl<C, K> Default for ECS<C, K> {
+impl<T> Default for ECS<T> {
     fn default() -> Self {
         Self {
             entities: Default::default(),
             comp_metas: Default::default(),
             relation_0: Default::default(),
             relation_1: Default::default(),
-            _phantom: Default::default(),
         }
     }
 }
 
-impl<C, K> ECS<C, K>
-where
-    C: AsRef<K>,
-    K: AsRef<u32>,
-{
+impl<T: Comp> ECS<T> {
     /// Create a new ECS instance.
     ///
     /// # Examples
@@ -196,10 +194,10 @@ where
     /// let entity_key = ecs.insert_entity();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ```
-    pub fn insert_comp(&mut self, entity_key: EntityKey, comp: C) -> Option<CompKey> {
+    pub fn insert_comp(&mut self, entity_key: EntityKey, comp: T) -> Option<CompKey> {
         self.entities.get(entity_key as usize)?;
 
-        let kind_key = *comp.as_ref().as_ref();
+        let kind_key = comp.kind();
 
         let comp_metas = self.comp_metas.entry(kind_key).or_default();
 
@@ -242,7 +240,7 @@ where
     ///
     /// assert_eq!(comp, 42);
     /// ```
-    pub fn remove_comp(&mut self, comp_key: CompKey) -> Option<C> {
+    pub fn remove_comp(&mut self, comp_key: CompKey) -> Option<T> {
         let (kind_key, slab_key) = comp_key;
 
         let comp_metas = self.comp_metas.get_mut(&kind_key)?;
@@ -277,7 +275,7 @@ where
     ///
     /// assert_eq!(comp, &42);
     /// ```
-    pub fn get_comp(&self, comp_key: CompKey) -> Option<&C> {
+    pub fn get_comp(&self, comp_key: CompKey) -> Option<&T> {
         let (kind_key, slab_key) = comp_key;
 
         let comps = self.comp_metas.get(&kind_key)?;
@@ -300,7 +298,7 @@ where
     ///
     /// assert_eq!(comp, &mut 42);
     /// ```
-    pub fn get_comp_mut(&mut self, comp_key: CompKey) -> Option<&mut C> {
+    pub fn get_comp_mut(&mut self, comp_key: CompKey) -> Option<&mut T> {
         let (kind_key, slab_key) = comp_key;
 
         let comp_metas = self.comp_metas.get_mut(&kind_key)?;
@@ -329,11 +327,11 @@ where
     /// assert_eq!(iter.next(), Some(&42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp(&self, kind: K) -> Option<impl Iterator<Item = &C>> {
-        let kind_key = *kind.as_ref();
+    pub fn iter_comp(&self) -> Option<impl Iterator<Item = &T>> {
+        let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self.comp_metas.get(&kind_key)?;
-        let iter = comps.iter().map(|(_, comp)| &comp.inner);
+        let comps = self.comp_metas.get(&type_key)?;
+        let iter = comps.iter().map(|(_, comp)| comp);
 
         Some(iter)
     }
@@ -358,11 +356,16 @@ where
     /// assert_eq!(iter.next(), Some(&mut 42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_mut(&mut self, kind: K) -> Option<impl Iterator<Item = &mut C>> {
-        let kind_key = *kind.as_ref();
+    pub fn iter_comp_mut<T: 'static>(&mut self) -> Option<impl Iterator<Item = &mut T>> {
+        let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self.comp_metas.get_mut(&kind_key)?;
-        let iter = comps.iter_mut().map(|(_, comp)| &mut comp.inner);
+        let comps = self
+            .comps
+            .get_mut(&type_key)?
+            .as_any_mut()
+            .downcast_mut::<slab::Slab<T>>()
+            .check();
+        let iter = comps.iter_mut().map(|(_, comp)| comp);
 
         Some(iter)
     }
@@ -412,20 +415,24 @@ where
     /// assert_eq!(iter.next(), Some(&63));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_by_entity(
+    pub fn iter_comp_by_entity<T: 'static>(
         &self,
         entity_key: EntityKey,
-        kind: K,
-    ) -> Option<impl Iterator<Item = &C>> {
-        let kind_key = *kind.as_ref();
+    ) -> Option<impl Iterator<Item = &T>> {
+        let type_key = std::any::TypeId::of::<T>();
 
-        let comp_metas = self.comp_metas.get(&kind_key)?;
+        let comps = self
+            .comps
+            .get(&type_key)?
+            .as_any()
+            .downcast_ref::<slab::Slab<T>>()
+            .check();
 
-        let relation_1 = self.relation_1.get(&(entity_key, kind_key))?;
+        let relation_1 = self.relation_1.get(&(entity_key, type_key))?;
 
         let iter = relation_1
             .iter()
-            .map(|(_, slab_key)| &comp_metas.get(*slab_key as usize).check().inner);
+            .map(|(_, slab_key)| comps.get(*slab_key as usize).check());
 
         Some(iter)
     }
@@ -449,23 +456,26 @@ where
     /// assert_eq!(iter.next(), Some(&mut 63));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_mut_by_entity(
+    pub fn iter_comp_mut_by_entity<T: 'static>(
         &mut self,
         entity_key: EntityKey,
-        kind: K,
-    ) -> Option<impl Iterator<Item = &mut C>> {
-        let kind_key = *kind.as_ref();
+    ) -> Option<impl Iterator<Item = &mut T>> {
+        let type_key = std::any::TypeId::of::<T>();
 
-        let comp_metas = self.comp_metas.get_mut(&kind_key)?;
+        let comps = self
+            .comps
+            .get_mut(&type_key)?
+            .as_any_mut()
+            .downcast_mut::<slab::Slab<T>>()
+            .check();
 
-        let relation_1 = self.relation_1.get(&(entity_key, kind_key))?;
+        let relation_1 = self.relation_1.get(&(entity_key, type_key))?;
 
         // UNSAFE: allow double mutable borrow temporarily
-        let iter = relation_1.iter().map(|(_, slab_key)| {
-            let comp_meta = comp_metas.get_mut(*slab_key as usize).check();
-            let comp = &mut comp_meta.inner;
-            unsafe { &mut *(comp as *mut C) }
-        });
+        let iter = relation_1
+            .iter()
+            .map(|(_, slab_key)| comps.get_mut(*slab_key as usize).check() as *mut T)
+            .map(|ptr| unsafe { &mut *ptr });
 
         Some(iter)
     }
@@ -482,6 +492,7 @@ where
     /// ```
     pub fn clear(&mut self) {
         self.entities.clear();
+        self.comps.clear();
         self.comp_metas.clear();
         self.relation_0.clear();
         self.relation_1.clear();
