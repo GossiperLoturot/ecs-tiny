@@ -13,6 +13,3 @@ categories = ["data-structures", "game-engines", "game-development"]
 [dependencies]
 ahash = "0.8"
 slab = "0.4"
-
-[dev-dependencies]
-strum_macros = "0.26"

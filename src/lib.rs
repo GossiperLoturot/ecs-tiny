@@ -5,47 +5,35 @@
 //! # Usages
 //!
 //! ```
-//! #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-//! #[strum_discriminants(name(CompKind))]
-//! #[strum_discriminants(derive(Hash))]
-//! enum Comp {
-//!     I32(i32),
-//!     Unit(()),
-//! }
-//!
 //! // Create new ecs instance and inserts new entity:
 //!
-//! let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+//! let mut ecs = ecs_tiny::ECS::new();
 //!
 //! let entity_key0 = ecs.insert_entity();
 //! let entity_key1 = ecs.insert_entity();
 //!
 //! // Inserts new component associated with specified entity:
 //!
-//! let comp_key0 = ecs.insert_comp(entity_key0, Comp::I32(42)).unwrap();
-//! let comp_key1 = ecs.insert_comp(entity_key0, Comp::I32(63)).unwrap();
-//! let comp_key2 = ecs.insert_comp(entity_key1, Comp::I32(42)).unwrap();
-//! let comp_key3 = ecs.insert_comp(entity_key1, Comp::Unit(())).unwrap();
+//! let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
+//! let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
+//! let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
+//! let comp_key3 = ecs.insert_comp(entity_key1, ()).unwrap();
 //!
 //! // Iterates over all components associated with specified entity:
 //!
-//! for comp in ecs.iter_comp_mut_by_entity(entity_key0, CompKind::I32).unwrap() {
-//!     if let Comp::I32(comp) = comp {
-//!         *comp += 1;
-//!     }
+//! for comp in ecs.iter_comp_mut_by_entity::<i32>(entity_key0).unwrap() {
+//!     *comp += 1;
 //! }
 //!
 //! // Iterates over all components of specified type (single type only):
 //!
-//! for comp in ecs.iter_comp_mut(CompKind::I32).unwrap() {
-//!     if let Comp::I32(comp) = comp {
-//!         *comp += 1;
-//!     }
+//! for comp in ecs.iter_comp_mut::<i32>().unwrap() {
+//!     *comp += 1;
 //! }
 //!
 //! // Removes specified component:
 //!
-//! ecs.remove_comp(comp_key0).unwrap();
+//! ecs.remove_comp::<i32>(comp_key0).unwrap();
 //!
 //! // Removes specified entity:
 //!
@@ -54,9 +42,8 @@
 
 type EntityKey = u32;
 
-type CompKey<K> = (K, u32);
+type CompKey = (u32, u32);
 
-#[derive(Debug, Clone)]
 struct CompMeta<T> {
     inner: T,
     entity_key: u32,
@@ -69,33 +56,23 @@ struct CompMeta<T> {
 /// # Examples
 ///
 /// ```
-/// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-/// #[strum_discriminants(name(CompKind))]
-/// #[strum_discriminants(derive(Hash))]
-/// enum Comp {
-///     I32(i32),
-///     Unit(()),
-/// }
-///
-/// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+/// let mut ecs = ecs_tiny::ECS::new();
 ///
 /// let entity_key = ecs.insert_entity();
 ///
-/// let comp_key0 = ecs.insert_comp(entity_key, Comp::I32(42)).unwrap();
-/// let comp_key1 = ecs.insert_comp(entity_key, Comp::I32(63)).unwrap();
+/// let comp_key0 = ecs.insert_comp(entity_key, 42).unwrap();
+/// let comp_key1 = ecs.insert_comp(entity_key, 63).unwrap();
 ///
-/// for comp in ecs.iter_comp_mut(CompKind::I32).unwrap() {
-///     if let Comp::I32(comp) = comp {
-///         *comp += 1;
-///     }
+/// for comp in ecs.iter_comp_mut::<i32>().unwrap() {
+///     *comp += 1;
 /// }
 /// ```
-#[derive(Debug, Clone)]
 pub struct ECS<C, K> {
     entities: slab::Slab<()>,
-    comp_metas: ahash::AHashMap<K, slab::Slab<CompMeta<C>>>,
-    relation_0: ahash::AHashMap<EntityKey, slab::Slab<(K, u32)>>,
-    relation_1: ahash::AHashMap<(EntityKey, K), slab::Slab<u32>>,
+    comp_metas: ahash::AHashMap<u32, slab::Slab<CompMeta<C>>>,
+    relation_0: ahash::AHashMap<EntityKey, slab::Slab<(u32, u32)>>,
+    relation_1: ahash::AHashMap<(EntityKey, u32), slab::Slab<u32>>,
+    _phantom: std::marker::PhantomData<K>,
 }
 
 impl<C, K> Default for ECS<C, K> {
@@ -105,29 +82,22 @@ impl<C, K> Default for ECS<C, K> {
             comp_metas: Default::default(),
             relation_0: Default::default(),
             relation_1: Default::default(),
+            _phantom: Default::default(),
         }
     }
 }
 
 impl<C, K> ECS<C, K>
 where
-    for<'a> K: From<&'a C>,
-    K: Copy + Eq + std::hash::Hash,
+    C: AsRef<K>,
+    K: AsRef<u32>,
 {
     /// Create a new ECS instance.
     ///
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// ```
     pub fn new() -> Self {
         Default::default()
@@ -138,15 +108,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
     /// ```
     pub fn insert_entity(&mut self) -> EntityKey {
@@ -160,15 +122,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
     /// ecs.remove_entity(entity_key).unwrap();
     /// ```
@@ -176,16 +130,16 @@ where
         self.entities.try_remove(entity_key as usize)?;
 
         if let Some(relation_0) = self.relation_0.remove(&entity_key) {
-            for (_, (kind_key, slab_key)) in relation_0 {
+            for (_, (type_key, slab_key)) in relation_0 {
                 let comp_meta = self
                     .comp_metas
-                    .get_mut(&kind_key)
+                    .get_mut(&type_key)
                     .check()
                     .try_remove(slab_key as usize)
                     .check();
 
                 self.relation_1
-                    .get_mut(&(entity_key, kind_key))
+                    .get_mut(&(entity_key, type_key))
                     .check()
                     .try_remove(comp_meta.relation_1 as usize)
                     .check();
@@ -202,15 +156,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
     /// ecs.get_entity(entity_key).unwrap();
     /// ```
@@ -224,15 +170,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
     /// let entity_key2 = ecs.insert_entity();
@@ -254,22 +192,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
-    /// let comp_key = ecs.insert_comp(entity_key, Comp::I32(42)).unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ```
-    pub fn insert_comp(&mut self, entity_key: EntityKey, comp: C) -> Option<CompKey<K>> {
+    pub fn insert_comp(&mut self, entity_key: EntityKey, comp: C) -> Option<CompKey> {
         self.entities.get(entity_key as usize)?;
 
-        let kind_key = K::from(&comp);
+        let kind_key = *comp.as_ref().as_ref();
 
         let comp_metas = self.comp_metas.entry(kind_key).or_default();
 
@@ -305,22 +235,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
-    /// let comp_key = ecs.insert_comp(entity_key, Comp::I32(42)).unwrap();
-    /// let comp = ecs.remove_comp(comp_key).unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// let comp = ecs.remove_comp::<i32>(comp_key).unwrap();
     ///
-    /// assert_eq!(comp, Comp::I32(42));
+    /// assert_eq!(comp, 42);
     /// ```
-    pub fn remove_comp(&mut self, comp_key: CompKey<K>) -> Option<C> {
+    pub fn remove_comp(&mut self, comp_key: CompKey) -> Option<C> {
         let (kind_key, slab_key) = comp_key;
 
         let comp_metas = self.comp_metas.get_mut(&kind_key)?;
@@ -348,22 +270,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
-    /// let comp_key = ecs.insert_comp(entity_key, Comp::I32(42)).unwrap();
-    /// let comp = ecs.get_comp(comp_key).unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// let comp = ecs.get_comp::<i32>(comp_key).unwrap();
     ///
-    /// assert_eq!(comp, &Comp::I32(42));
+    /// assert_eq!(comp, &42);
     /// ```
-    pub fn get_comp(&self, comp_key: CompKey<K>) -> Option<&C> {
+    pub fn get_comp(&self, comp_key: CompKey) -> Option<&C> {
         let (kind_key, slab_key) = comp_key;
 
         let comps = self.comp_metas.get(&kind_key)?;
@@ -379,22 +293,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
-    /// let comp_key = ecs.insert_comp(entity_key, Comp::I32(42)).unwrap();
-    /// let comp = ecs.get_comp_mut(comp_key).unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// let comp = ecs.get_comp_mut::<i32>(comp_key).unwrap();
     ///
-    /// assert_eq!(comp, &mut Comp::I32(42));
+    /// assert_eq!(comp, &mut 42);
     /// ```
-    pub fn get_comp_mut(&mut self, comp_key: CompKey<K>) -> Option<&mut C> {
+    pub fn get_comp_mut(&mut self, comp_key: CompKey) -> Option<&mut C> {
         let (kind_key, slab_key) = comp_key;
 
         let comp_metas = self.comp_metas.get_mut(&kind_key)?;
@@ -410,28 +316,22 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
-    /// ecs.insert_comp(entity_key0, Comp::I32(42)).unwrap();
-    /// ecs.insert_comp(entity_key0, Comp::I32(63)).unwrap();
-    /// ecs.insert_comp(entity_key1, Comp::I32(42)).unwrap();
-    /// let mut iter = ecs.iter_comp(CompKind::I32).unwrap();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp::<i32>().unwrap();
     ///
-    /// assert_eq!(iter.next(), Some(&Comp::I32(42)));
-    /// assert_eq!(iter.next(), Some(&Comp::I32(63)));
-    /// assert_eq!(iter.next(), Some(&Comp::I32(42)));
+    /// assert_eq!(iter.next(), Some(&42));
+    /// assert_eq!(iter.next(), Some(&63));
+    /// assert_eq!(iter.next(), Some(&42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp(&self, kind_key: K) -> Option<impl Iterator<Item = &C>> {
+    pub fn iter_comp(&self, kind: K) -> Option<impl Iterator<Item = &C>> {
+        let kind_key = *kind.as_ref();
+
         let comps = self.comp_metas.get(&kind_key)?;
         let iter = comps.iter().map(|(_, comp)| &comp.inner);
 
@@ -445,28 +345,22 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
-    /// ecs.insert_comp(entity_key0, Comp::I32(42)).unwrap();
-    /// ecs.insert_comp(entity_key0, Comp::I32(63)).unwrap();
-    /// ecs.insert_comp(entity_key1, Comp::I32(42)).unwrap();
-    /// let mut iter = ecs.iter_comp_mut(CompKind::I32).unwrap();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp_mut::<i32>().unwrap();
     ///
-    /// assert_eq!(iter.next(), Some(&mut Comp::I32(42)));
-    /// assert_eq!(iter.next(), Some(&mut Comp::I32(63)));
-    /// assert_eq!(iter.next(), Some(&mut Comp::I32(42)));
+    /// assert_eq!(iter.next(), Some(&mut 42));
+    /// assert_eq!(iter.next(), Some(&mut 63));
+    /// assert_eq!(iter.next(), Some(&mut 42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_mut(&mut self, kind_key: K) -> Option<impl Iterator<Item = &mut C>> {
+    pub fn iter_comp_mut(&mut self, kind: K) -> Option<impl Iterator<Item = &mut C>> {
+        let kind_key = *kind.as_ref();
+
         let comps = self.comp_metas.get_mut(&kind_key)?;
         let iter = comps.iter_mut().map(|(_, comp)| &mut comp.inner);
 
@@ -480,28 +374,20 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
-    /// let comp_key0 = ecs.insert_comp(entity_key0, Comp::I32(42)).unwrap();
-    /// let comp_key1 = ecs.insert_comp(entity_key0, Comp::I32(63)).unwrap();
-    /// let comp_key2 = ecs.insert_comp(entity_key1, Comp::I32(42)).unwrap();
+    /// let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
+    /// let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
+    /// let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
     /// let entity_key = ecs.get_entity_by_comp(comp_key0).unwrap();
     ///
     /// assert_eq!(entity_key, entity_key0);
     /// ```
-    pub fn get_entity_by_comp(&self, comp_key: CompKey<K>) -> Option<EntityKey> {
-        let (kind_key, slab_key) = comp_key;
+    pub fn get_entity_by_comp(&self, comp_key: CompKey) -> Option<EntityKey> {
+        let (type_key, slab_key) = comp_key;
 
-        let comp_metas = self.comp_metas.get(&kind_key)?;
+        let comp_metas = self.comp_metas.get(&type_key)?;
         let comp_meta = comp_metas.get(slab_key as usize)?;
 
         Some(comp_meta.entity_key)
@@ -514,31 +400,25 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
-    /// ecs.insert_comp(entity_key0, Comp::I32(42)).unwrap();
-    /// ecs.insert_comp(entity_key0, Comp::I32(63)).unwrap();
-    /// ecs.insert_comp(entity_key1, Comp::I32(42)).unwrap();
-    /// let mut iter = ecs.iter_comp_by_entity(entity_key0, CompKind::I32).unwrap();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp_by_entity::<i32>(entity_key0).unwrap();
     ///
-    /// assert_eq!(iter.next(), Some(&Comp::I32(42)));
-    /// assert_eq!(iter.next(), Some(&Comp::I32(63)));
+    /// assert_eq!(iter.next(), Some(&42));
+    /// assert_eq!(iter.next(), Some(&63));
     /// assert_eq!(iter.next(), None);
     /// ```
     pub fn iter_comp_by_entity(
         &self,
         entity_key: EntityKey,
-        kind_key: K,
+        kind: K,
     ) -> Option<impl Iterator<Item = &C>> {
+        let kind_key = *kind.as_ref();
+
         let comp_metas = self.comp_metas.get(&kind_key)?;
 
         let relation_1 = self.relation_1.get(&(entity_key, kind_key))?;
@@ -557,31 +437,25 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
-    /// ecs.insert_comp(entity_key0, Comp::I32(42)).unwrap();
-    /// ecs.insert_comp(entity_key0, Comp::I32(63)).unwrap();
-    /// ecs.insert_comp(entity_key1, Comp::I32(42)).unwrap();
-    /// let mut iter = ecs.iter_comp_mut_by_entity(entity_key0, CompKind::I32).unwrap();
+    /// ecs.insert_comp(entity_key0, 42).unwrap();
+    /// ecs.insert_comp(entity_key0, 63).unwrap();
+    /// ecs.insert_comp(entity_key1, 42).unwrap();
+    /// let mut iter = ecs.iter_comp_mut_by_entity::<i32>(entity_key0).unwrap();
     ///
-    /// assert_eq!(iter.next(), Some(&mut Comp::I32(42)));
-    /// assert_eq!(iter.next(), Some(&mut Comp::I32(63)));
+    /// assert_eq!(iter.next(), Some(&mut 42));
+    /// assert_eq!(iter.next(), Some(&mut 63));
     /// assert_eq!(iter.next(), None);
     /// ```
     pub fn iter_comp_mut_by_entity(
         &mut self,
         entity_key: EntityKey,
-        kind_key: K,
+        kind: K,
     ) -> Option<impl Iterator<Item = &mut C>> {
+        let kind_key = *kind.as_ref();
+
         let comp_metas = self.comp_metas.get_mut(&kind_key)?;
 
         let relation_1 = self.relation_1.get(&(entity_key, kind_key))?;
@@ -601,17 +475,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// #[derive(Debug, Clone, PartialEq, Eq, strum_macros::EnumDiscriminants)]
-    /// #[strum_discriminants(name(CompKind))]
-    /// #[strum_discriminants(derive(Hash))]
-    /// enum Comp {
-    ///     I32(i32),
-    ///     Unit(()),
-    /// }
-    ///
-    /// let mut ecs = ecs_tiny::ECS::<Comp, CompKind>::new();
+    /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
-    /// let comp_key = ecs.insert_comp(entity_key, Comp::I32(42)).unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ecs.clear();
     /// ```
     pub fn clear(&mut self) {
