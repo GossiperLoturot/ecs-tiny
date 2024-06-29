@@ -15,6 +15,11 @@ let mut ecs = ecs_tiny::ECS::new();
 let entity_key0 = ecs.insert_entity();
 let entity_key1 = ecs.insert_entity();
 
+// Register new component type:
+
+ecs.register::<i32>().unwrap();
+ecs.register::<()>().unwrap();
+
 // Inserts new component associated with specified entity:
 
 let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();

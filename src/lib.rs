@@ -11,7 +11,12 @@
 //! 
 //! let entity_key0 = ecs.insert_entity();
 //! let entity_key1 = ecs.insert_entity();
-//! 
+//!
+//! // Register new component type:
+//!
+//! ecs.register::<i32>().unwrap();
+//! ecs.register::<()>().unwrap();
+//!
 //! // Inserts new component associated with specified entity:
 //! 
 //! let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
@@ -40,37 +45,23 @@
 //! ecs.remove_entity(entity_key1).unwrap();
 //! ```
 
-/// A trait for operating of Slab without type annotation.
-trait AnySlab {
-    fn as_any(&self) -> &dyn std::any::Any;
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-
-    fn try_remove(&mut self, key: usize) -> Option<()>;
-}
-
-impl<T: 'static> AnySlab for slab::Slab<T> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn try_remove(&mut self, key: usize) -> Option<()> {
-        self.try_remove(key).map(|_| ())
-    }
-}
-
 type EntityKey = u32;
 
 type CompKey = (std::any::TypeId, u32);
 
-struct CompMeta {
+struct CompRow<T> {
+    comp: T,
     entity_key: u32,
-    relation_0: u32,
-    relation_1: u32,
+    ref_0_row_key: u32,
+    ref_1_row_key: u32,
+}
+
+const ALLOC_SIZE: usize = std::mem::size_of::<slab::Slab<CompRow<()>>>();
+
+struct CompColumn {
+    comp_rows: stack_any::StackAny<ALLOC_SIZE>,
+    get_row_fn: fn(&Self, u32) -> Option<CompRow<()>>,
+    remove_row_fn: fn(&mut Self, u32) -> Option<CompRow<()>>,
 }
 
 /// A minimal ECS supporting entity and component insertion/removal, association, and single-type iteration.
@@ -82,6 +73,8 @@ struct CompMeta {
 ///
 /// let entity_key = ecs.insert_entity();
 ///
+/// ecs.register::<i32>().unwrap();
+///
 /// let comp_key0 = ecs.insert_comp(entity_key, 42).unwrap();
 /// let comp_key1 = ecs.insert_comp(entity_key, 63).unwrap();
 ///
@@ -92,10 +85,9 @@ struct CompMeta {
 #[derive(Default)]
 pub struct ECS {
     entities: slab::Slab<()>,
-    comps: ahash::AHashMap<std::any::TypeId, Box<dyn AnySlab>>,
-    comp_metas: ahash::AHashMap<std::any::TypeId, slab::Slab<CompMeta>>,
-    relation_0: ahash::AHashMap<EntityKey, slab::Slab<(std::any::TypeId, u32)>>,
-    relation_1: ahash::AHashMap<(EntityKey, std::any::TypeId), slab::Slab<u32>>,
+    comp_cols: ahash::AHashMap<std::any::TypeId, CompColumn>,
+    ref_0_cols: ahash::AHashMap<EntityKey, slab::Slab<(std::any::TypeId, u32)>>,
+    ref_1_cols: ahash::AHashMap<(EntityKey, std::any::TypeId), slab::Slab<u32>>,
 }
 
 impl ECS {
@@ -136,26 +128,16 @@ impl ECS {
     pub fn remove_entity(&mut self, entity_key: EntityKey) -> Option<()> {
         self.entities.try_remove(entity_key as usize)?;
 
-        if let Some(relation_0) = self.relation_0.remove(&entity_key) {
-            for (_, (type_key, slab_key)) in relation_0 {
-                self.comps
-                    .get_mut(&type_key)
-                    .check()
-                    .try_remove(slab_key as usize)
-                    .check();
+        if let Some(ref_0_col) = self.ref_0_cols.remove(&entity_key) {
+            for (_, (type_key, row_key)) in ref_0_col {
+                let comp_col = self.comp_cols.get_mut(&type_key).unwrap();
+                let comp_row = (comp_col.remove_row_fn)(comp_col, row_key).unwrap();
 
-                let comp_meta = self
-                    .comp_metas
-                    .get_mut(&type_key)
-                    .check()
-                    .try_remove(slab_key as usize)
-                    .check();
-
-                self.relation_1
+                self.ref_1_cols
                     .get_mut(&(entity_key, type_key))
-                    .check()
-                    .try_remove(comp_meta.relation_1 as usize)
-                    .check();
+                    .unwrap()
+                    .try_remove(comp_row.ref_1_row_key as usize)
+                    .unwrap();
             }
         }
 
@@ -198,6 +180,86 @@ impl ECS {
         self.entities.iter().map(|(key, _)| key as u32)
     }
 
+    /// Register component type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// ```
+    pub fn register<T>(&mut self) -> Option<()>
+    where
+        T: std::any::Any,
+    {
+        let type_key = std::any::TypeId::of::<T>();
+
+        if self.comp_cols.contains_key(&type_key) {
+            return None;
+        }
+
+        let comp_col = CompColumn {
+            comp_rows: stack_any::StackAny::try_new(slab::Slab::<CompRow<T>>::new()).unwrap(),
+            get_row_fn: |comp_col, row_key| {
+                let comp_row = comp_col
+                    .comp_rows
+                    .downcast_ref::<slab::Slab<CompRow<T>>>()
+                    .unwrap()
+                    .get(row_key as usize)?;
+                Some(CompRow {
+                    comp: (),
+                    entity_key: comp_row.entity_key,
+                    ref_0_row_key: comp_row.ref_0_row_key,
+                    ref_1_row_key: comp_row.ref_1_row_key,
+                })
+            },
+            remove_row_fn: |comp_col, row_key| {
+                let comp_row = comp_col
+                    .comp_rows
+                    .downcast_mut::<slab::Slab<CompRow<T>>>()
+                    .unwrap()
+                    .try_remove(row_key as usize)?;
+                Some(CompRow {
+                    comp: (),
+                    entity_key: comp_row.entity_key,
+                    ref_0_row_key: comp_row.ref_0_row_key,
+                    ref_1_row_key: comp_row.ref_1_row_key,
+                })
+            },
+        };
+        self.comp_cols.insert(type_key, comp_col);
+
+        Some(())
+    }
+
+    /// Unregister component type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut ecs = ecs_tiny::ECS::new();
+    /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
+    /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
+    /// ecs.unregister::<i32>().unwrap();
+    /// ```
+    pub fn unregister<T>(&mut self) -> Option<()>
+    where
+        T: std::any::Any,
+    {
+        let type_key = std::any::TypeId::of::<T>();
+
+        if !self.comp_cols.contains_key(&type_key) {
+            return None;
+        }
+
+        self.comp_cols.remove(&type_key);
+
+        Some(())
+    }
+
     /// Insert a new component with the corresponding entity key and return the corresponding component key.
     /// If the entity corresponding to the entity key is not found, return an `None`.
     /// Otherwise, return an `Some(CompKey)`.
@@ -207,46 +269,46 @@ impl ECS {
     /// ```
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ```
-    pub fn insert_comp<T: 'static>(&mut self, entity_key: EntityKey, comp: T) -> Option<CompKey> {
+    pub fn insert_comp<T>(&mut self, entity_key: EntityKey, comp: T) -> Option<CompKey>
+    where
+        T: std::any::Any,
+    {
         self.entities.get(entity_key as usize)?;
 
         let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self
-            .comps
-            .entry(type_key)
-            .or_insert_with(|| Box::new(slab::Slab::<T>::new()))
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
+        let comp_rows = self
+            .comp_cols
+            .get_mut(&type_key)?
+            .comp_rows
+            .downcast_mut::<slab::Slab<CompRow<T>>>()
+            .unwrap();
 
-        let slab_key = comps.insert(comp) as u32;
+        let row_key = comp_rows.vacant_key() as u32;
 
-        let relation_0 = self
-            .relation_0
+        let ref_0_row_key = self
+            .ref_0_cols
             .entry(entity_key)
             .or_default()
-            .insert((type_key, slab_key)) as u32;
+            .insert((type_key, row_key)) as u32;
 
-        let relation_1 = self
-            .relation_1
+        let ref_1_row_key = self
+            .ref_1_cols
             .entry((entity_key, type_key))
             .or_default()
-            .insert(slab_key) as u32;
+            .insert(row_key) as u32;
 
-        let comp_meta = CompMeta {
+        comp_rows.insert(CompRow {
+            comp,
             entity_key,
-            relation_0,
-            relation_1,
-        };
-        self.comp_metas
-            .entry(type_key)
-            .or_default()
-            .insert(comp_meta);
+            ref_0_row_key,
+            ref_1_row_key,
+        });
 
-        Some((type_key, slab_key))
+        Some((type_key, row_key))
     }
 
     /// Remove a component with the corresponding component key and type, and return the component.
@@ -258,42 +320,43 @@ impl ECS {
     /// ```
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// let comp = ecs.remove_comp::<i32>(comp_key).unwrap();
     ///
     /// assert_eq!(comp, 42);
     /// ```
-    pub fn remove_comp<T: 'static>(&mut self, comp_key: CompKey) -> Option<T> {
-        let (type_key, slab_key) = comp_key;
+    pub fn remove_comp<T>(&mut self, comp_key: CompKey) -> Option<T>
+    where
+        T: std::any::Any,
+    {
+        let (type_key, row_key) = comp_key;
 
         if type_key != std::any::TypeId::of::<T>() {
             return None;
         }
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get_mut(&type_key)?
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
-        let comp = comps.try_remove(slab_key as usize)?;
+            .comp_rows
+            .downcast_mut::<slab::Slab<CompRow<T>>>()
+            .unwrap();
+        let comp_row = comp_rows.try_remove(row_key as usize)?;
 
-        let comp_metas = self.comp_metas.get_mut(&type_key).check();
-        let comp_meta = comp_metas.try_remove(slab_key as usize).check();
+        self.ref_0_cols
+            .get_mut(&comp_row.entity_key)
+            .unwrap()
+            .try_remove(comp_row.ref_0_row_key as usize)
+            .unwrap();
 
-        self.relation_0
-            .get_mut(&comp_meta.entity_key)
-            .check()
-            .try_remove(comp_meta.relation_0 as usize)
-            .check();
+        self.ref_1_cols
+            .get_mut(&(comp_row.entity_key, type_key))
+            .unwrap()
+            .try_remove(comp_row.ref_1_row_key as usize)
+            .unwrap();
 
-        self.relation_1
-            .get_mut(&(comp_meta.entity_key, type_key))
-            .check()
-            .try_remove(comp_meta.relation_1 as usize)
-            .check();
-
-        Some(comp)
+        Some(comp_row.comp)
     }
 
     /// Return a component with the corresponding component key and type.
@@ -305,27 +368,31 @@ impl ECS {
     /// ```
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// let comp = ecs.get_comp::<i32>(comp_key).unwrap();
     ///
     /// assert_eq!(comp, &42);
     /// ```
-    pub fn get_comp<T: 'static>(&self, comp_key: CompKey) -> Option<&T> {
-        let (type_key, slab_key) = comp_key;
+    pub fn get_comp<T>(&self, comp_key: CompKey) -> Option<&T>
+    where
+        T: std::any::Any,
+    {
+        let (type_key, row_key) = comp_key;
 
         if type_key != std::any::TypeId::of::<T>() {
             return None;
         }
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get(&type_key)?
-            .as_any()
-            .downcast_ref::<slab::Slab<T>>()
-            .check();
-        let comp = comps.get(slab_key as usize)?;
+            .comp_rows
+            .downcast_ref::<slab::Slab<CompRow<T>>>()
+            .unwrap();
+        let comp_row = comp_rows.get(row_key as usize)?;
 
-        Some(comp)
+        Some(&comp_row.comp)
     }
 
     /// Return a mutable component with the corresponding component key and type.
@@ -337,27 +404,31 @@ impl ECS {
     /// ```
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// let comp = ecs.get_comp_mut::<i32>(comp_key).unwrap();
     ///
     /// assert_eq!(comp, &mut 42);
     /// ```
-    pub fn get_comp_mut<T: 'static>(&mut self, comp_key: CompKey) -> Option<&mut T> {
-        let (type_key, slab_key) = comp_key;
+    pub fn get_comp_mut<T>(&mut self, comp_key: CompKey) -> Option<&mut T>
+    where
+        T: std::any::Any,
+    {
+        let (type_key, row_key) = comp_key;
 
         if type_key != std::any::TypeId::of::<T>() {
             return None;
         }
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get_mut(&type_key)?
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
-        let comp = comps.get_mut(slab_key as usize)?;
+            .comp_rows
+            .downcast_mut::<slab::Slab<CompRow<T>>>()
+            .unwrap();
+        let comp = comp_rows.get_mut(row_key as usize)?;
 
-        Some(comp)
+        Some(&mut comp.comp)
     }
 
     /// Return an iterator over all components of the corresponding type.
@@ -370,6 +441,7 @@ impl ECS {
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// ecs.insert_comp(entity_key0, 42).unwrap();
     /// ecs.insert_comp(entity_key0, 63).unwrap();
     /// ecs.insert_comp(entity_key1, 42).unwrap();
@@ -380,16 +452,19 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp<T: 'static>(&self) -> Option<impl Iterator<Item = &T>> {
+    pub fn iter_comp<T>(&self) -> Option<impl Iterator<Item = &T>>
+    where
+        T: std::any::Any,
+    {
         let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get(&type_key)?
-            .as_any()
-            .downcast_ref::<slab::Slab<T>>()
-            .check();
-        let iter = comps.iter().map(|(_, comp)| comp);
+            .comp_rows
+            .downcast_ref::<slab::Slab<CompRow<T>>>()
+            .unwrap();
+        let iter = comp_rows.iter().map(|(_, comp_row)| &comp_row.comp);
 
         Some(iter)
     }
@@ -404,6 +479,7 @@ impl ECS {
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// ecs.insert_comp(entity_key0, 42).unwrap();
     /// ecs.insert_comp(entity_key0, 63).unwrap();
     /// ecs.insert_comp(entity_key1, 42).unwrap();
@@ -414,16 +490,19 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&mut 42));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_mut<T: 'static>(&mut self) -> Option<impl Iterator<Item = &mut T>> {
+    pub fn iter_comp_mut<T>(&mut self) -> Option<impl Iterator<Item = &mut T>>
+    where
+        T: std::any::Any,
+    {
         let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get_mut(&type_key)?
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
-        let iter = comps.iter_mut().map(|(_, comp)| comp);
+            .comp_rows
+            .downcast_mut::<slab::Slab<CompRow<T>>>()
+            .unwrap();
+        let iter = comp_rows.iter_mut().map(|(_, comp_row)| &mut comp_row.comp);
 
         Some(iter)
     }
@@ -438,6 +517,7 @@ impl ECS {
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
     /// let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
     /// let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
@@ -446,12 +526,12 @@ impl ECS {
     /// assert_eq!(entity_key, entity_key0);
     /// ```
     pub fn get_entity_by_comp(&self, comp_key: CompKey) -> Option<EntityKey> {
-        let (type_key, slab_key) = comp_key;
+        let (type_key, row_key) = comp_key;
 
-        let comp_metas = self.comp_metas.get(&type_key)?;
-        let comp_meta = comp_metas.get(slab_key as usize)?;
+        let comp_col = self.comp_cols.get(&type_key)?;
+        let comp_row = (comp_col.get_row_fn)(comp_col, row_key)?;
 
-        Some(comp_meta.entity_key)
+        Some(comp_row.entity_key)
     }
 
     /// Return an iterator over all components with the corresponding entity key and type.
@@ -464,6 +544,7 @@ impl ECS {
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// ecs.insert_comp(entity_key0, 42).unwrap();
     /// ecs.insert_comp(entity_key0, 63).unwrap();
     /// ecs.insert_comp(entity_key1, 42).unwrap();
@@ -473,24 +554,24 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&63));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_by_entity<T: 'static>(
-        &self,
-        entity_key: EntityKey,
-    ) -> Option<impl Iterator<Item = &T>> {
+    pub fn iter_comp_by_entity<T>(&self, entity_key: EntityKey) -> Option<impl Iterator<Item = &T>>
+    where
+        T: std::any::Any,
+    {
         let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get(&type_key)?
-            .as_any()
-            .downcast_ref::<slab::Slab<T>>()
-            .check();
+            .comp_rows
+            .downcast_ref::<slab::Slab<CompRow<T>>>()
+            .unwrap();
 
-        let relation_1 = self.relation_1.get(&(entity_key, type_key))?;
+        let ref_1_col = self.ref_1_cols.get(&(entity_key, type_key))?;
 
-        let iter = relation_1
+        let iter = ref_1_col
             .iter()
-            .map(|(_, slab_key)| comps.get(*slab_key as usize).check());
+            .map(|(_, row_key)| &comp_rows.get(*row_key as usize).unwrap().comp);
 
         Some(iter)
     }
@@ -505,6 +586,7 @@ impl ECS {
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key0 = ecs.insert_entity();
     /// let entity_key1 = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// ecs.insert_comp(entity_key0, 42).unwrap();
     /// ecs.insert_comp(entity_key0, 63).unwrap();
     /// ecs.insert_comp(entity_key1, 42).unwrap();
@@ -514,25 +596,28 @@ impl ECS {
     /// assert_eq!(iter.next(), Some(&mut 63));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter_comp_mut_by_entity<T: 'static>(
+    pub fn iter_comp_mut_by_entity<T>(
         &mut self,
         entity_key: EntityKey,
-    ) -> Option<impl Iterator<Item = &mut T>> {
+    ) -> Option<impl Iterator<Item = &mut T>>
+    where
+        T: std::any::Any,
+    {
         let type_key = std::any::TypeId::of::<T>();
 
-        let comps = self
-            .comps
+        let comp_rows = self
+            .comp_cols
             .get_mut(&type_key)?
-            .as_any_mut()
-            .downcast_mut::<slab::Slab<T>>()
-            .check();
+            .comp_rows
+            .downcast_mut::<slab::Slab<CompRow<T>>>()
+            .unwrap();
 
-        let relation_1 = self.relation_1.get(&(entity_key, type_key))?;
+        let ref_1_col = self.ref_1_cols.get(&(entity_key, type_key))?;
 
         // UNSAFE: allow double mutable borrow temporarily
-        let iter = relation_1
+        let iter = ref_1_col
             .iter()
-            .map(|(_, slab_key)| comps.get_mut(*slab_key as usize).check() as *mut T)
+            .map(|(_, row_key)| &mut comp_rows.get_mut(*row_key as usize).unwrap().comp as *mut T)
             .map(|ptr| unsafe { &mut *ptr });
 
         Some(iter)
@@ -545,25 +630,14 @@ impl ECS {
     /// ```
     /// let mut ecs = ecs_tiny::ECS::new();
     /// let entity_key = ecs.insert_entity();
+    /// ecs.register::<i32>().unwrap();
     /// let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
     /// ecs.clear();
     /// ```
     pub fn clear(&mut self) {
         self.entities.clear();
-        self.comps.clear();
-        self.comp_metas.clear();
-        self.relation_0.clear();
-        self.relation_1.clear();
-    }
-}
-
-/// A trait for easily invoking unrecoverable integrity errors.
-trait IntegrityCheck<T> {
-    fn check(self) -> T;
-}
-
-impl<T> IntegrityCheck<T> for Option<T> {
-    fn check(self) -> T {
-        self.expect("integrity check")
+        self.comp_cols.clear();
+        self.ref_0_cols.clear();
+        self.ref_1_cols.clear();
     }
 }

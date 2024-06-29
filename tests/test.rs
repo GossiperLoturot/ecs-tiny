@@ -14,6 +14,7 @@ fn crud_entity() {
 fn crud_comp() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
     let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
 
     assert_eq!(ecs.get_comp::<i32>(comp_key), Some(&42));
@@ -38,6 +39,7 @@ fn insert_comp_with_invalid_entity() {
 fn remove_comp_with_invalid_type() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
     let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
 
     assert!(ecs.get_comp::<()>(comp_key).is_none());
@@ -49,6 +51,7 @@ fn remove_comp_with_invalid_type() {
 fn remove_entity_and_associated_comp() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
     let comp_key = ecs.insert_comp(entity_key, 42).unwrap();
 
     assert!(ecs.remove_entity(entity_key).is_some());
@@ -75,6 +78,8 @@ fn iter_comp() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key0 = ecs.insert_entity();
     let entity_key1 = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
+    ecs.register::<()>().unwrap();
     ecs.insert_comp(entity_key0, 42).unwrap();
     ecs.insert_comp(entity_key0, 63).unwrap();
     ecs.insert_comp(entity_key1, 42).unwrap();
@@ -108,6 +113,8 @@ fn get_entity_by_comp() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key0 = ecs.insert_entity();
     let entity_key1 = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
+    ecs.register::<()>().unwrap();
     let comp_key0 = ecs.insert_comp(entity_key0, 42).unwrap();
     let comp_key1 = ecs.insert_comp(entity_key0, 63).unwrap();
     let comp_key2 = ecs.insert_comp(entity_key1, 42).unwrap();
@@ -125,6 +132,8 @@ fn iter_comp_by_entity() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key0 = ecs.insert_entity();
     let entity_key1 = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
+    ecs.register::<()>().unwrap();
     ecs.insert_comp(entity_key0, 42).unwrap();
     ecs.insert_comp(entity_key0, 63).unwrap();
     ecs.insert_comp(entity_key1, 42).unwrap();
@@ -148,6 +157,8 @@ fn clear() {
     let mut ecs = ecs_tiny::ECS::new();
     let entity_key0 = ecs.insert_entity();
     let entity_key1 = ecs.insert_entity();
+    ecs.register::<i32>().unwrap();
+    ecs.register::<()>().unwrap();
     ecs.insert_comp(entity_key0, 42).unwrap();
     ecs.insert_comp(entity_key0, 63).unwrap();
     ecs.insert_comp(entity_key1, 42).unwrap();
